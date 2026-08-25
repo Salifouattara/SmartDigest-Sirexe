@@ -1,0 +1,6 @@
+{
+  "name": "BioGaz+ SmartDigest",
+  "description": "Plateforme intelligente IoT, IA prédictive & Blockchain pour l'optimisation de la méthanisation et la traçabilité des crédits carbone (SIREXE 2026).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
