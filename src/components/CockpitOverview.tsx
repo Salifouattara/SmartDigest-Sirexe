@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { TelemetryData, OptimizationResult, BlockchainBatch } from "../types";
+import { apiUrl } from "../api";
 import { Flame, Droplets, Thermometer, Gauge, ShieldAlert, Sparkles, ArrowRight, RefreshCw, Zap, TrendingUp, CheckCircle2 } from "lucide-react";
 
 interface CockpitOverviewProps {
@@ -27,7 +28,7 @@ export const CockpitOverview: React.FC<CockpitOverviewProps> = ({
     setCopilotLoading(true);
     setIsCopilotOpen(true);
     try {
-      const res = await fetch("/api/gemini/analyze", {
+      const res = await fetch(apiUrl("/api/gemini/analyze"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

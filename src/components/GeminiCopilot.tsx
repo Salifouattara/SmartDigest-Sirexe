@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Sparkles, MessageSquare, Send, Award, RefreshCw, HelpCircle, CheckCircle2 } from "lucide-react";
 import { TelemetryData, OptimizationResult } from "../types";
+import { apiUrl } from "../api";
 
 interface GeminiCopilotProps {
   telemetry: TelemetryData;
@@ -21,7 +22,7 @@ export const GeminiCopilot: React.FC<GeminiCopilotProps> = ({
 
     setLoading(true);
     try {
-      const res = await fetch("/api/gemini/analyze", {
+      const res = await fetch(apiUrl("/api/gemini/analyze"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

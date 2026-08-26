@@ -8,6 +8,7 @@ import { CodeExplorer } from "./components/CodeExplorer";
 import { GeminiCopilot } from "./components/GeminiCopilot";
 import { TelemetryData, SubstrateInfo, OptimizationResult, BlockchainBatch } from "./types";
 import { SUBSTRATES_DB, optimizeRecipe } from "./utils/biogasCalculator";
+import { apiUrl } from "./api";
 
 type FastApiTelemetryRecord = {
   timestamp: number;
@@ -90,14 +91,14 @@ export default function App() {
   // Fetch latest telemetry and batches from server
   const fetchTelemetry = useCallback(async () => {
     try {
-      const res = await fetch("/api/iot/latest");
+      const res = await fetch(apiUrl("/api/iot/latest"));
       if (res.ok) {
         const data: FastApiTelemetryRecord = await res.json();
         if (data.data) {
           setTelemetry(fromFastApiTelemetry(data));
         }
       }
-      const histRes = await fetch("/api/iot/history?limit=20");
+      const histRes = await fetch(apiUrl("/api/iot/history?limit=20"));
       if (histRes.ok) {
         const history: FastApiTelemetryRecord[] = await histRes.json();
         setTelemetryHistory(history.map(fromFastApiTelemetry));
@@ -109,7 +110,7 @@ export default function App() {
 
   const fetchBatches = useCallback(async () => {
     try {
-      const res = await fetch("/api/blockchain/ledger");
+      const res = await fetch(apiUrl("/api/blockchain/ledger"));
       if (res.ok) {
         const data = await res.json();
         if (data?.batches) {
@@ -141,7 +142,7 @@ export default function App() {
     setTelemetryHistory((prev) => [...prev.slice(-25), next]);
 
     try {
-      const res = await fetch("/api/iot/telemetry", {
+      const res = await fetch(apiUrl("/api/iot/telemetry"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(next),
@@ -223,7 +224,7 @@ export default function App() {
   // Recipe optimize handler
   const handleOptimizeRecipe = async (inputs: { substrate_type: string; tonnage: number }[]) => {
     try {
-      const res = await fetch("/api/ai/optimize-recipe", {
+      const res = await fetch(apiUrl("/api/ai/optimize-recipe"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ available_inputs: inputs }),
@@ -250,7 +251,7 @@ export default function App() {
     };
 
     try {
-      const res = await fetch("/api/blockchain/record-batch", {
+      const res = await fetch(apiUrl("/api/blockchain/record-batch"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
