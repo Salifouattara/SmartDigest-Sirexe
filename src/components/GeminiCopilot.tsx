@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Sparkles, MessageSquare, Send, Award, RefreshCw, HelpCircle, CheckCircle2 } from "lucide-react";
+import { Sparkles, MessageSquare, Send, RefreshCw, HelpCircle, CheckCircle2 } from "lucide-react";
 import { TelemetryData, OptimizationResult } from "../types";
 import { apiUrl } from "../api";
 
@@ -16,9 +16,9 @@ export const GeminiCopilot: React.FC<GeminiCopilotProps> = ({
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
 
-  const handleAskQuestion = async (customPrompt?: string, type: "custom" | "pitch" | "diagnose" = "custom") => {
+  const handleAskQuestion = async (customPrompt?: string) => {
     const q = customPrompt || question;
-    if (!q && type === "custom") return;
+    if (!q) return;
 
     setLoading(true);
     try {
@@ -26,7 +26,7 @@ export const GeminiCopilot: React.FC<GeminiCopilotProps> = ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type,
+          type: "custom",
           question: q,
           telemetry,
           recipe: optimization
@@ -44,7 +44,7 @@ export const GeminiCopilot: React.FC<GeminiCopilotProps> = ({
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+      <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
             <Sparkles className="w-4 h-4" />
@@ -55,16 +55,6 @@ export const GeminiCopilot: React.FC<GeminiCopilotProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => handleAskQuestion(undefined, "pitch")}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
-          >
-            <Award className="w-3.5 h-3.5 text-amber-600" />
-            <span>Générer le Pitch Jury SIREXE</span>
-          </button>
-        </div>
       </div>
 
       {/* Suggested Quick Questions */}
