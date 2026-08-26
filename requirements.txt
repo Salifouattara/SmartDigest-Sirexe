@@ -1,22 +1,7 @@
-# =============================================================================
-# BioGaz+ / SmartDigest - Dépendances Python (SIREXE Hackathon 2026)
-# =============================================================================
-
-# Backend & API
+# Render / FastAPI runtime dependencies.
+# The React frontend is built and deployed independently.
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
 pydantic==2.6.4
 python-dotenv==1.0.1
-
-# Data Science & IA
-#scikit-learn==1.4.1.post1
-numpy==1.26.4
-pandas==2.2.1
-
-# Dashboard & Frontend
-streamlit==1.32.2
 requests==2.31.0
-
-# Blockchain / Web3 (Optionnel pour interaction RPC Ethereum / Polygon)
-web3==6.15.1
-eth-account==0.11.0
