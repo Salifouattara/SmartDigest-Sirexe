@@ -32,9 +32,10 @@ export const GeminiCopilot: React.FC<GeminiCopilotProps> = ({
         })
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Gemini analysis failed");
       setResponse(data.text || data.fallback || "Analyse complétée.");
-    } catch {
-      setResponse("Le système BioGaz+ / SmartDigest combine l'IoT temps réel et l'IA pour maximiser la production de biométhane à partir des résidus de manioc, de cacao, de palme et de lisier en Côte d'Ivoire.");
+    } catch (error) {
+      setResponse(error instanceof Error ? error.message : "Le service Gemini est indisponible.");
     } finally {
       setLoading(false);
     }

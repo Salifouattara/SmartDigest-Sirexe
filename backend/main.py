@@ -10,10 +10,22 @@ Stack: Python 3.10+, FastAPI, Pydantic, Scikit-learn (ou heuristique avancée C/
 import time
 import math
 import hashlib
+import random
+import os
+from pathlib import Path
 from typing import List, Optional, Dict
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+import requests
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:8501,http://localhost:8501",
+).split(",")
 
 app = FastAPI(
     title="BioGaz+ / SmartDigest API",
@@ -24,8 +36,8 @@ app = FastAPI(
 # Configuration CORS pour Streamlit / Frontend React
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -91,6 +103,15 @@ SUBSTRATES_DB = {
     }
 }
 
+SUBSTRATE_UI_METADATA = {
+    "fumier_bovin": {"nomCourt": "Lisier Bovin", "icone": "🐄", "categorie": "Élevage"},
+    "dechets_manioc": {"nomCourt": "Résidus Manioc", "icone": "🥔", "categorie": "Agroalimentaire"},
+    "effluents_huile_palme": {"nomCourt": "Effluents POME", "icone": "🌴", "categorie": "Agro-Industrie"},
+    "dechets_marche_menagers": {"nomCourt": "Déchets Marchés", "icone": "🥗", "categorie": "Urbain"},
+    "fientes_volailles": {"nomCourt": "Fientes Avicoles", "icone": "🐔", "categorie": "Élevage"},
+    "residus_cacao": {"nomCourt": "Cabosses Cacao", "icone": "🍫", "categorie": "Agro-Industrie"},
+}
+
 # ---------------------------------------------------------------------------
 # MODÈLES PYDANTIC
 # ---------------------------------------------------------------------------
@@ -123,6 +144,12 @@ class BatchBlockchainRecord(BaseModel):
     ch4_avg_percent: float
     carbon_credits_tco2e: float
     tx_hash: Optional[str] = None
+
+class GeminiAnalysisRequest(BaseModel):
+    type: str = Field(default="custom")
+    question: Optional[str] = None
+    telemetry: Optional[Dict] = None
+    recipe: Optional[Dict] = None
 
 # Stockage en mémoire pour le prototype hackathon
 telemetry_history: List[Dict] = []
@@ -177,10 +204,12 @@ def calculate_recipe_metrics(inputs: List[WasteInputItem]) -> Dict:
         breakdown.append({
             "type": item.substrate_type,
             "nom": sub_info["nom"],
+            **SUBSTRATE_UI_METADATA[item.substrate_type],
             "tonnage": item.tonnage,
             "pct_du_total": round((item.tonnage / total_tonnage) * 100, 1),
             "matiere_seche_t": round(ms_item, 2),
-            "bmp_ch4_m3": round(ch4_potential_item, 1)
+            "bmp_ch4_m3": round(ch4_potential_item, 1),
+            "ratio_CN_unitaire": sub_info["ratio_CN"]
         })
 
     # Calcul des métriques globales
@@ -204,12 +233,12 @@ def calculate_recipe_metrics(inputs: List[WasteInputItem]) -> Dict:
     alert_level = "GREEN"
 
     if overall_cn_ratio < 18.0:
-        status = "RISQUE_INHIBITION_AMMONIACALE"
+        status = "RISQUE_AMMONIAQUE"
         alert_level = "WARNING"
         recommendations.append("Le ratio C/N est trop bas (< 18). Risque d'accumulation d'ammoniaque toxique pour les bactéries méthanogènes.")
         recommendations.append("Action recommandée : Ajouter des résidus riches en carbone (Épluchures de manioc ou cabosses de cacao) à hauteur de +15-20%.")
     elif overall_cn_ratio > 35.0:
-        status = "RISQUE_RALENTISSEMENT_C_EXCES"
+        status = "RISQUE_CARBONE_EXCES"
         alert_level = "WARNING"
         recommendations.append("Le ratio C/N est trop élevé (> 35). Les micro-organismes manquent d'azote pour leur croissance cellulaire.")
         recommendations.append("Action recommandée : Augmenter la part de fientes de volailles ou d'effluents POME pour abaisser le C/N.")
@@ -271,7 +300,7 @@ def receive_iot_telemetry(data: TelemetryData):
 
     if data.ch4_percent < 50.0:
         alerts.append("ALERTE: Taux de CH4 bas (<50%). Risque d'acidification ou lavage de biomasse.")
-        status = "DEGRADE"
+        status = "ALERTE"
     if data.h2s_ppm > 400.0:
         alerts.append("ALERTE: Concentration en H2S élevée (>400 ppm). Risque de corrosion des génératrices et inhibition.")
         status = "ALERTE"
@@ -280,7 +309,7 @@ def receive_iot_telemetry(data: TelemetryData):
         status = "ALERTE"
     if data.pressure_mbar > 28.0:
         alerts.append("DANGER: Surpression dans le dôme de stockage (>28 mbar). Soupape de sécurité requise.")
-        status = "DANGER"
+        status = "CRITIQUE"
     if data.ph < 6.7:
         alerts.append(f"CRITIQUE: pH acide ({data.ph}). Inhibition des archées méthanogènes.")
         status = "CRITIQUE"
@@ -360,6 +389,7 @@ def record_batch_on_blockchain(batch: BatchBlockchainRecord):
     record["tx_hash"] = tx_hash
     record["block_number"] = 1042000 + len(blockchain_ledger) + 1
     record["status"] = "CONFIRMED"
+    record["is_verified"] = True
     record["contract_address"] = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e"
     
     blockchain_ledger.append(record)
@@ -381,6 +411,120 @@ def get_blockchain_ledger():
         "total_carbon_credits_tco2e": sum(item.get("carbon_credits_tco2e", 0) for item in blockchain_ledger),
         "batches": blockchain_ledger
     }
+
+@app.post("/api/gemini/analyze")
+def analyze_with_gemini(payload: GeminiAnalysisRequest):
+    """Server-side Gemini proxy. The API key never reaches the browser."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="GEMINI_API_KEY is not configured on the server.")
+
+    telemetry = payload.telemetry or {}
+    recipe = payload.recipe or {}
+    if payload.type == "pitch":
+        prompt = (
+            "Rédige un pitch SIREXE de trois minutes pour BioGaz+ / SmartDigest, "
+            "structuré autour de l'IoT, de l'optimisation C/N et de la traçabilité carbone blockchain."
+        )
+    elif payload.type == "diagnose":
+        prompt = (
+            "En tant qu'expert en méthanisation, analyse ces mesures en trois points : "
+            "santé microbiologique, risques immédiats, puis deux actions opérationnelles. "
+            f"Télémétrie : {telemetry}. Recette C/N : {recipe}."
+        )
+    else:
+        prompt = (
+            "Tu es l'assistant BioGaz+ / SmartDigest. Réponds de façon concise, "
+            "pragmatique et adaptée aux intrants ivoiriens (manioc, POME, cacao, lisier). "
+            f"Question : {payload.question or ''}"
+        )
+
+    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    # Use a stable, standard GenerateContent model while diagnosing API availability.
+    model = "gemini-2.5-flash"
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    request_body = {"contents": [{"parts": [{"text": prompt}]}]}
+    retryable_statuses = {408, 429, 503}
+    last_error: Exception | None = None
+
+    for attempt, delay_seconds in enumerate((1, 2, 4), start=1):
+        try:
+            response = requests.post(
+                endpoint,
+                headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                json=request_body,
+                timeout=60,
+            )
+            if response.status_code not in retryable_statuses:
+                response.raise_for_status()
+                text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+                return {"success": True, "text": text}
+
+            print(f"Gemini retryable HTTP {response.status_code}: {response.text}")
+            last_error = requests.HTTPError(
+                f"Gemini returned HTTP {response.status_code}: {response.text}",
+                response=response,
+            )
+        except requests.exceptions.HTTPError as error:
+            response_text = error.response.text if error.response is not None else "<no response body>"
+            print(f"Gemini HTTP error: {error}\nResponse body: {response_text}")
+            raise HTTPException(
+                status_code=502,
+                detail="La requête Gemini a été refusée. Vérifiez la clé API, le modèle et la configuration du projet.",
+            ) from error
+        except requests.exceptions.RequestException as error:
+            print(f"Gemini network or timeout error: {error}")
+            last_error = error
+        except (KeyError, IndexError, ValueError) as error:
+            raise HTTPException(
+                status_code=502,
+                detail="Gemini returned an invalid response format.",
+            ) from error
+
+        if attempt < 3:
+            time.sleep(delay_seconds + random.uniform(0, 0.25))
+
+    fallback_model = "gemini-3.5-flash-lite"
+    fallback_endpoint = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{fallback_model}:generateContent"
+    )
+    try:
+        print(f"Gemini primary model unavailable; trying fallback model {fallback_model}.")
+        response = requests.post(
+            fallback_endpoint,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            json=request_body,
+            timeout=60,
+        )
+        if response.status_code in retryable_statuses:
+            print(f"Gemini fallback HTTP {response.status_code}: {response.text}")
+            last_error = requests.HTTPError(
+                f"Gemini fallback returned HTTP {response.status_code}: {response.text}",
+                response=response,
+            )
+        else:
+            response.raise_for_status()
+            text = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return {"success": True, "text": text, "model": fallback_model}
+    except requests.exceptions.HTTPError as error:
+        response_text = error.response.text if error.response is not None else "<no response body>"
+        print(f"Gemini fallback HTTP error: {error}\nResponse body: {response_text}")
+        last_error = error
+    except requests.exceptions.RequestException as error:
+        print(f"Gemini fallback network or timeout error: {error}")
+        last_error = error
+    except (KeyError, IndexError, ValueError) as error:
+        print(f"Gemini fallback response parsing error: {error}")
+        last_error = error
+
+    print(f"Gemini failed after retries: {last_error}")
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "Le service Gemini est temporairement indisponible après 3 tentatives. "
+            "Veuillez réessayer dans quelques instants."
+        ),
+    ) from last_error
 
 if __name__ == "__main__":
     import uvicorn

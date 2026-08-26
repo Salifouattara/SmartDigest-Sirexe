@@ -37,9 +37,10 @@ export const CockpitOverview: React.FC<CockpitOverviewProps> = ({
         })
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Gemini diagnosis failed");
       setCopilotText(data.text || data.fallback || "Analyse complétée.");
-    } catch {
-      setCopilotText("La flore anaérobie méthanogène est en phase exponentielle stable avec une teneur en CH₄ supérieure à 62% et un pH tamponné. Recommandation : Maintenir le flux d'alimentation continue.");
+    } catch (error) {
+      setCopilotText(error instanceof Error ? error.message : "Le service Gemini est indisponible.");
     } finally {
       setCopilotLoading(false);
     }

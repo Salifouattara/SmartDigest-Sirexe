@@ -9,6 +9,20 @@ import { GeminiCopilot } from "./components/GeminiCopilot";
 import { TelemetryData, SubstrateInfo, OptimizationResult, BlockchainBatch } from "./types";
 import { SUBSTRATES_DB, optimizeRecipe } from "./utils/biogasCalculator";
 
+type FastApiTelemetryRecord = {
+  timestamp: number;
+  data: Omit<TelemetryData, "timestamp" | "status" | "alerts">;
+  status: TelemetryData["status"];
+  alerts: string[];
+};
+
+const fromFastApiTelemetry = (record: FastApiTelemetryRecord): TelemetryData => ({
+  timestamp: record.timestamp * 1000,
+  ...record.data,
+  status: record.status,
+  alerts: record.alerts,
+});
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>("cockpit");
   const [substrates] = useState<Record<string, SubstrateInfo>>(SUBSTRATES_DB);
@@ -78,15 +92,15 @@ export default function App() {
     try {
       const res = await fetch("/api/iot/latest");
       if (res.ok) {
-        const data = await res.json();
-        if (data?.data) {
-          setTelemetry(data.data);
+        const data: FastApiTelemetryRecord = await res.json();
+        if (data.data) {
+          setTelemetry(fromFastApiTelemetry(data));
         }
       }
       const histRes = await fetch("/api/iot/history?limit=20");
       if (histRes.ok) {
-        const hist = await histRes.json();
-        setTelemetryHistory(hist);
+        const history: FastApiTelemetryRecord[] = await histRes.json();
+        setTelemetryHistory(history.map(fromFastApiTelemetry));
       }
     } catch {
       // Fallback in-memory
@@ -95,11 +109,14 @@ export default function App() {
 
   const fetchBatches = useCallback(async () => {
     try {
-      const res = await fetch("/api/blockchain/batches");
+      const res = await fetch("/api/blockchain/ledger");
       if (res.ok) {
         const data = await res.json();
         if (data?.batches) {
-          setBatches(data.batches);
+          setBatches(data.batches.map((batch: BlockchainBatch) => ({
+            ...batch,
+            is_verified: batch.is_verified ?? batch.status === "CONFIRMED",
+          })));
         }
       }
     } catch {
@@ -124,11 +141,22 @@ export default function App() {
     setTelemetryHistory((prev) => [...prev.slice(-25), next]);
 
     try {
-      await fetch("/api/iot/telemetry", {
+      const res = await fetch("/api/iot/telemetry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(next),
       });
+      if (!res.ok) throw new Error("FastAPI rejected the telemetry payload");
+
+      const receipt = await res.json();
+      const confirmed: TelemetryData = {
+        ...next,
+        timestamp: receipt.timestamp * 1000,
+        status: receipt.status,
+        alerts: receipt.alerts,
+      };
+      setTelemetry(confirmed);
+      setTelemetryHistory((prev) => [...prev.slice(0, -1), confirmed]);
     } catch {
       // Offline fallback
     }
@@ -193,10 +221,16 @@ export default function App() {
   };
 
   // Recipe optimize handler
-  const handleOptimizeRecipe = (inputs: { substrate_type: string; tonnage: number }[]) => {
+  const handleOptimizeRecipe = async (inputs: { substrate_type: string; tonnage: number }[]) => {
     try {
-      const results = optimizeRecipe(inputs);
-      setOptimization(results);
+      const res = await fetch("/api/ai/optimize-recipe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ available_inputs: inputs }),
+      });
+      if (!res.ok) throw new Error("FastAPI recipe optimization failed");
+      const data = await res.json();
+      setOptimization(data.results);
     } catch {
       // Keep previous
     }
@@ -205,6 +239,8 @@ export default function App() {
   // Mint batch handler
   const handleMintBatch = async () => {
     const payload = {
+      batch_id: `BATCH-${Date.now()}`,
+      timestamp: Math.floor(Date.now() / 1000),
       operator_id: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
       total_waste_tonnes: optimization.total_tonnage,
       substrates: optimization.breakdown.map((b) => b.nomCourt),
@@ -214,17 +250,13 @@ export default function App() {
     };
 
     try {
-      const res = await fetch("/api/blockchain/record", {
+      const res = await fetch("/api/blockchain/record-batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.batch) {
-          setBatches((prev) => [data.batch, ...prev]);
-        }
-      }
+      if (!res.ok) throw new Error("FastAPI batch certification failed");
+      await fetchBatches();
     } catch {
       // Local fallback
       const mockBatch: BlockchainBatch = {
