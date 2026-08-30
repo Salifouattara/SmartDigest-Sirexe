@@ -12,6 +12,7 @@ import math
 import hashlib
 import random
 import os
+import json
 from pathlib import Path
 from typing import List, Optional, Dict
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -19,6 +20,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 import requests
+
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:  # pragma: no cover - optional dependency in local demos
+    mqtt = None
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -32,6 +38,10 @@ app = FastAPI(
     description="API IoT, IA d'Optimisation des Intrants et Traçabilité Blockchain pour la Méthanisation",
     version="1.0.0"
 )
+
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "localhost")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+MQTT_TOPIC = os.getenv("MQTT_TOPIC", "biogas/plant/+/telemetry")
 
 # Configuration CORS pour Streamlit / Frontend React
 app.add_middleware(
@@ -262,6 +272,62 @@ def calculate_recipe_metrics(inputs: List[WasteInputItem]) -> Dict:
         "recommendations": recommendations,
         "breakdown": breakdown
     }
+
+def _store_telemetry_record(payload: Dict):
+    """Enregistre une donnée capteur normalisée dans le flux de télémétrie global."""
+    normalized = {
+        "ch4_percent": float(payload.get("ch4_percent", 60.0)),
+        "h2s_ppm": float(payload.get("h2s_ppm", 150.0)),
+        "temperature_celsius": float(payload.get("temperature_celsius", 38.0)),
+        "pressure_mbar": float(payload.get("pressure_mbar", 18.0)),
+        "ph": float(payload.get("ph", 7.3)),
+        "flow_rate_m3_h": float(payload.get("flow_rate_m3_h", 45.0)),
+        "vfa_tic_ratio": float(payload.get("vfa_tic_ratio", 0.22)),
+    }
+    receive_iot_telemetry(TelemetryData(**normalized))
+
+
+def _on_mqtt_message(client, userdata, msg):
+    try:
+        payload = json.loads(msg.payload.decode("utf-8"))
+        if isinstance(payload, dict):
+            _store_telemetry_record(payload)
+            print(f"[MQTT] message reçu sur {msg.topic}: {payload}")
+    except Exception as exc:  # pragma: no cover - debug/logging path
+        print(f"[MQTT] message invalide: {exc}")
+
+
+mqtt_client = None
+
+
+def start_mqtt_listener():
+    global mqtt_client
+    if mqtt is None:
+        print("[MQTT] paho-mqtt non installé; le broker est désactivé pour cette session.")
+        return
+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.on_message = _on_mqtt_message
+
+    def on_connect(_client, _userdata, _flags, rc, _properties=None):
+        print(f"[MQTT] connecté au broker {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT} (code {rc})")
+        _client.subscribe(MQTT_TOPIC)
+
+    client.on_connect = on_connect
+
+    try:
+        client.connect(MQTT_BROKER_HOST, MQTT_BROKER_PORT, 60)
+        client.loop_start()
+        mqtt_client = client
+        print(f"[MQTT] écoute démarrée sur le topic {MQTT_TOPIC}")
+    except Exception as exc:
+        print(f"[MQTT] impossible de se connecter au broker: {exc}")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Démarre le consommateur MQTT en arrière-plan afin d'ingérer les capteurs simulés."""
+    start_mqtt_listener()
 
 # ---------------------------------------------------------------------------
 # ENDPOINTS API REST

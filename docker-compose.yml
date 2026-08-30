@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: biogas-mosquitto
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mqtt/config:/mosquitto/config
+      - ./mqtt/data:/mosquitto/data
+      - ./mqtt/log:/mosquitto/log
+
+  mqtt-simulator:
+    image: python:3.11-slim
+    container_name: biogas-mqtt-sim
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: bash -lc "pip install paho-mqtt && python scripts/mqtt_sensor_simulator.py"
+    environment:
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT: 1883
+    depends_on:
+      - mosquitto

@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "author": "Copilot",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp32",
+      "top": true
+    },
+    {
+      "type": "sensor-dht22",
+      "id": "dht22",
+      "x": 120,
+      "y": 120
+    },
+    {
+      "type": "led",
+      "id": "okLed",
+      "x": 250,
+      "y": 150,
+      "attrs": {
+        "color": "green"
+      }
+    },
+    {
+      "type": "led",
+      "id": "alertLed",
+      "x": 310,
+      "y": 150,
+      "attrs": {
+        "color": "red"
+      }
+    }
+  ],
+  "connections": [
+    ["esp32:GPIO4", "dht22:SDA", "green"],
+    ["esp32:GND", "dht22:GND", "black"],
+    ["esp32:3V3", "dht22:VCC", "red"],
+
+    ["esp32:GPIO2", "okLed:anode", "green"],
+    ["esp32:GND", "okLed:cathode", "black"],
+
+    ["esp32:GPIO15", "alertLed:anode", "red"],
+    ["esp32:GND", "alertLed:cathode", "black"]
+  ]
+}
